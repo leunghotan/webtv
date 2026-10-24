@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xtream & M3U Web Player - 多畫面旗艦版</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
+  <style>
+    :root {
+      --bg-dark: #0f1117;
+      --card-bg: #1a1d26;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --border: #2e3444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+    }
+    .brand { font-size: 1.1rem; font-weight: bold; color: #60a5fa; }
+    .header-controls { display: flex; gap: 10px; align-items: center; }
+    select, button {
+      background: #11141c;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); font-weight: 500; }
+    button.primary:hover { background: var(--accent-hover); }
+    .layout-btn.active { background: #3b82f6; border-color: #60a5fa; font-weight: bold; }
+
+    #main-container { display: flex; flex: 1; overflow: hidden; }
+
+    #grid-container {
+      flex: 1;
+      display: grid;
+      background: #000;
+      gap: 3px;
+      padding: 3px;
+      position: relative;
+    }
+    #grid-container.layout-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    #grid-container.layout-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+    #grid-container.layout-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+    #grid-container.layout-3 .slot:nth-child(1) { grid-column: span 2; }
+    #grid-container.layout-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+    .slot {
+      background: #0b0d13;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid transparent;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .slot.active-slot { border-color: #3b82f6; }
+    .slot video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+    .slot-overlay {
+      position: absolute;
+      top: 8px; left: 8px;
+      background: rgba(0,0,0,0.7);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .slot-controls {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      gap: 6px;
+      z-index: 6;
+    }
+    .slot-controls button {
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 3px 7px;
+      font-size: 0.75rem;
+      border-radius: 4px;
+    }
+    .slot-controls button:hover { background: rgba(255,255,255,0.3); }
+
+    #sidebar {
+      width: 320px;
+      background: var(--card-bg);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+    .filter-panel {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #141720;
+    }
+    .filter-panel select, .filter-panel input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #0b0d12;
+      border: 1px solid var(--border);
+      color: #fff;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    #channel-list { flex: 1; overflow-y: auto; list-style: none; }
+    .channel-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .channel-item:hover { background: rgba(255,255,255,0.05); }
+    .channel-item.active { background: var(--accent); color: #fff; }
+    .channel-info { flex: 1; overflow: hidden; }
+    .channel-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+    .channel-group { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; }
+    .channel-item.active .channel-group { color: #dbeafe; }
+
+    #settings-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(4px);
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .modal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 500px;
+      max-width: 92vw;
+      padding: 24px;
+      max-height: 88vh;
+      overflow-y: auto;
+    }
+    .modal-card h3 { margin-bottom: 14px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 0.8rem; margin-bottom: 4px; color: var(--text-muted); }
+    .form-group input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #11141c;
+      border: 1px solid var(--border);
+      color: #fff;
+    }
+    .source-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #11141c;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .tab-btn {
+      padding: 6px 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">📺 Multiview Web Player</div>
+    
+    <div style="display:flex; gap:6px;">
+      <button class="layout-btn active" onclick="setLayout(1)">單畫面</button>
+      <button class="layout-btn" onclick="setLayout(2)">2 畫面</button>
+      <button class="layout-btn" onclick="setLayout(3)">3 畫面</button>
+      <button class="layout-btn" onclick="setLayout(4)">4 畫面</button>
+    </div>
+
+    <div class="header-controls">
+      <select id="source-selector" onchange="changeActiveSource(this.value)"></select>
+      <button class="primary" onclick="openModal()">⚙️ 管理播放源</button>
+    </div>
+  </header>
+
+  <div id="main-container">
+    <div id="grid-container" class="layout-1">
+      <div class="slot active-slot" id="slot-0" onclick="selectSlot(0)">
+        <div class="slot-overlay" id="overlay-0">畫面 1 (點選設為目標)</div>
+        <div class="slot-controls">
+          <button id="audio-btn-0" onclick="toggleAudio(0, event)">🔊 發聲</button>
+          <button onclick="closeSlot(0, event)">✖ 關閉</button>
+        </div>
+        <video id="video-0" autoplay playsinline muted></video>
+      </div>
+
+      <div class="slot" id="slot-1" style="display:none;" onclick="selectSlot(1)">
+        <div class="slot-overlay" id="overlay-1">畫面 2 (點選設為目標)</div>
+        <div class="slot-controls">
+          <button id="audio-btn-1" onclick="toggleAudio(1, event)">🔇 靜音</button>
+          <button onclick="closeSlot(1, event)">✖ 關閉</button>
+        </div>
+        <video id="video-1" autoplay playsinline muted></video>
+      </div>
+
+      <div class="slot" id="slot-2" style="display:none;" onclick="selectSlot(2)">
+        <div class="slot-overlay" id="overlay-2">畫面 3 (點選設為目標)</div>
+        <div class="slot-controls">
+          <button id="audio-btn-2" onclick="toggleAudio(2, event)">🔇 靜音</button>
+          <button onclick="closeSlot(2, event)">✖ 關閉</button>
+        </div>
+        <video id="video-2" autoplay playsinline muted></video>
+      </div>
+
+      <div class="slot" id="slot-3" style="display:none;" onclick="selectSlot(3)">
+        <div class="slot-overlay" id="overlay-3">畫面 4 (點選設為目標)</div>
+        <div class="slot-controls">
+          <button id="audio-btn-3" onclick="toggleAudio(3, event)">🔇 靜音</button>
+          <button onclick="closeSlot(3, event)">✖ 關閉</button>
+        </div>
+        <video id="video-3" autoplay playsinline muted></video>
+      </div>
+    </div>
+
+    <div id="sidebar">
+      <div class="filter-panel">
+        <select id="group-filter" onchange="applyFilters()">
+          <option value="ALL">📁 所有分組 (全部頻道)</option>
+        </select>
+        <input type="text" id="search-input" placeholder="🔍 搜尋頻道名稱..." oninput="applyFilters()">
+      </div>
+      <ul id="channel-list"></ul>
+    </div>
+  </div>
+
+  <div id="settings-modal">
+    <div class="modal-card">
+      <h3>📡 播放源管理</h3>
+      <div id="source-list-ui"></div>
+      <hr style="border:none; border-top: 1px solid var(--border); margin: 16px 0;">
+      <div style="display:flex; gap:10px; margin-bottom: 12px; border-bottom: 1px solid var(--border);">
+        <button class="tab-btn" id="tab-xtream-btn" onclick="switchTab('xtream')">Xtream Codes</button>
+        <button class="tab-btn active" id="tab-m3u-btn" onclick="switchTab('m3u')">M3U 連結</button>
+      </div>
+      <div id="form-xtream" style="display:none;">
+        <div class="form-group"><label>標籤名稱</label><input type="text" id="xc-name"></div>
+        <div class="form-group"><label>伺服器網址</label><input type="text" id="xc-host"></div>
+        <div style="display: flex; gap: 10px;">
+          <div class="form-group" style="flex:1;"><label>用戶名</label><input type="text" id="xc-user"></div>
+          <div class="form-group" style="flex:1;"><label>密碼</label><input type="password" id="xc-pass"></div>
+        </div>
+      </div>
+      <div id="form-m3u">
+        <div class="form-group"><label>標籤名稱</label><input type="text" id="m3u-name"></div>
+        <div class="form-group"><label>M3U 網址</label><input type="text" id="m3u-url"></div>
+      </div>
+      <div class="form-group" style="margin-top: 10px;">
+        <label><input type="checkbox" id="use-cors-proxy"> 抓取清單時經 Worker 代理</label>
+      </div>
+      <div style="display: flex; gap: 10px; margin-top: 18px;">
+        <button class="primary" style="flex:1; padding: 10px;" onclick="addSource()">儲存並加入</button>
+        <button style="display: flex; gap: 10px; padding: 10px;" onclick="closeModal()">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const WORKER_HOST = "tv.fsnt-tan.workers.dev";
+    const WORKER_PROXY = `https://${WORKER_HOST}/?url=`;
+
+    let currentLayout = 1;
+    let activeSlotIndex = 0;
+    let allChannels = [];
+    let currentTab = 'm3u';
+
+    const players = [
+      { hls: null, ts: null, name: '' },
+      { hls: null, ts: null, name: '' },
+      { hls: null, ts: null, name: '' },
+      { hls: null, ts: null, name: '' }
+    ];
+
+    const DEFAULT_DATA = [
+      {
+        type: 'm3u',
+        name: '第一源 (TG 訂閱)',
+        url: 'https://tgbot-sub.sharewithyou.dpdns.org/sub?token=sub_def4e43cac17fddfd096f36e',
+        proxy: true
+      },
+      {
+        type: 'm3u',
+        name: '第二源 (tv.fsnt-tan Worker)',
+        url: 'https://tv.fsnt-tan.workers.dev/',
+        proxy: false
+      }
+    ];
+
+    function setLayout(n) {
+      currentLayout = n;
+      document.querySelectorAll('.layout-btn').forEach((b, i) => {
+        b.classList.toggle('active', i === n - 1);
+      });
+
+      const container = document.getElementById('grid-container');
+      container.className = `layout-${n}`;
+
+      for (let i = 0; i < 4; i++) {
+        const slotEl = document.getElementById(`slot-${i}`);
+        if (i < n) {
+          slotEl.style.display = 'flex';
+        } else {
+          slotEl.style.display = 'none';
+          closeSlot(i);
+        }
+      }
+
+      if (activeSlotIndex >= n) {
+        selectSlot(0);
+      }
+    }
+
+    function selectSlot(index) {
+      activeSlotIndex = index;
+      document.querySelectorAll('.slot').forEach((s, i) => {
+        s.classList.toggle('active-slot', i === index);
+      });
+    }
+
+    function toggleAudio(index, e) {
+      if (e) e.stopPropagation();
+      for (let i = 0; i < 4; i++) {
+        const v = document.getElementById(`video-${i}`);
+        const btn = document.getElementById(`audio-btn-${i}`);
+        if (i === index) {
+          v.muted = false;
+          if (btn) btn.innerText = "🔊 發聲";
+        } else {
+          v.muted = true;
+          if (btn) btn.innerText = "🔇 靜音";
+        }
+      }
+    }
+
+    function closeSlot(index, e) {
+      if (e) e.stopPropagation();
+      cleanupSlotPlayer(index);
+      const v = document.getElementById(`video-${index}`);
+      v.removeAttribute('src');
+      v.load();
+      document.getElementById(`overlay-${index}`).innerText = `畫面 ${index + 1} (待命中)`;
+      players[index].name = '';
+    }
+
+    function cleanupSlotPlayer(idx) {
+      if (players[idx].hls) {
+        players[idx].hls.destroy();
+        players[idx].hls = null;
+      }
+      if (players[idx].ts) {
+        players[idx].ts.pause();
+        players[idx].ts.unload();
+        players[idx].ts.detachMediaElement();
+        players[idx].ts.destroy();
+        players[idx].ts = null;
+      }
+    }
+
+    function resolveStreamUrl(rawUrl) {
+      if (!rawUrl) return "";
+      let target = rawUrl.trim();
+      if (target.includes(WORKER_HOST)) return target;
+      return WORKER_PROXY + encodeURIComponent(target);
+    }
+
+    function playStream(ch) {
+      const idx = activeSlotIndex;
+      const v = document.getElementById(`video-${idx}`);
+      const overlay = document.getElementById(`overlay-${idx}`);
+
+      overlay.innerText = `畫面 ${idx + 1}: 連接中 (${ch.name})`;
+      cleanupSlotPlayer(idx);
+
+      const finalStreamUrl = resolveStreamUrl(ch.url);
+      v.muted = true;
+
+      const isDirectTs = finalStreamUrl.includes('.ts') || finalStreamUrl.includes('sharewithyou') || !finalStreamUrl.includes('.m3u8');
+
+      if (isDirectTs && mpegts.getFeatureList().mseLivePlayback) {
+        tryMpegTs(idx, finalStreamUrl, ch.name, () => {
+          tryHls(idx, finalStreamUrl, ch.name);
+        });
+      } else {
+        tryHls(idx, finalStreamUrl, ch.name);
+      }
+
+      if (currentLayout > 1) {
+        selectSlot((idx + 1) % currentLayout);
+      }
+    }
+
+    // 平滑順暢版 MPEG-TS 引擎配置
+    function tryMpegTs(idx, url, channelName, onFail) {
+      const v = document.getElementById(`video-${idx}`);
+      const overlay = document.getElementById(`overlay-${idx}`);
+
+      try {
+        const p = mpegts.createPlayer({
+          type: 'mse',
+          isLive: true,
+          url: url
+        }, {
+          enableWorker: true,
+          enableStashBuffer: true,
+          stashInitialSize: 512 * 1024, // 預留 512KB 初始化緩衝，消除微小斷音微卡
+          lazyLoad: false,
+          liveBufferLatencyChasing: true, // 開啟追幀以保持即時性
+          liveBufferLatencyMaxLatency: 8.0, // 放寬最大延遲容忍至 8 秒，防止頻繁加速卡頓
+          liveBufferLatencyMinRemain: 2.0, // 始終保留 2 秒緩衝護城河，網絡輕微抖動完全不受影響
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 15,
+          autoCleanupMinBackwardDuration: 8
+        });
+
+        p.attachMediaElement(v);
+        p.load();
+        
+        let playStarted = false;
+        p.on(mpegts.Events.MEDIA_INFO, () => {
+          playStarted = true;
+          overlay.innerText = `畫面 ${idx + 1}: ${channelName}`;
+          v.play().catch(e => console.log(e));
+        });
+
+        p.on(mpegts.Events.ERROR, (errType, errDetail) => {
+          console.warn("MPEGTS 報錯:", errType, errDetail);
+          if (!playStarted && onFail) {
+            cleanupSlotPlayer(idx);
+            onFail();
+          }
+        });
+
+        players[idx].ts = p;
+
+        setTimeout(() => {
+          if (!playStarted && players[idx].ts === p) {
+            if (onFail) {
+              cleanupSlotPlayer(idx);
+              onFail();
+            }
+          }
+        }, 7000);
+
+      } catch (e) {
+        if (onFail) onFail();
+      }
+    }
+
+    // 平滑順暢版 HLS 引擎配置
+    function tryHls(idx, url, channelName) {
+      const v = document.getElementById(`video-${idx}`);
+      const overlay = document.getElementById(`overlay-${idx}`);
+
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 40,
+          maxBufferSize: 50 * 1000 * 1000,
+          manifestLoadingTimeOut: 30000,
+          fragLoadingTimeOut: 30000,
+          nudgeOffset: 0.1,
+          nudgeMaxRetry: 5
+        });
+
+        hls.loadSource(url);
+        hls.attachMedia(v);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          overlay.innerText = `畫面 ${idx + 1}: ${channelName}`;
+          players[idx].name = channelName;
+          v.play().catch(e => console.log('Autoplay handled:', e));
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                overlay.innerText = `畫面 ${idx + 1}: 播放失敗`;
+                break;
+            }
+          }
+        });
+
+        players[idx].hls = hls;
+
+      } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+        v.src = url;
+        v.play();
+        overlay.innerText = `畫面 ${idx + 1}: ${channelName}`;
+      }
+    }
+
+    function getStoredSources() {
+      const data = localStorage.getItem('iptv_source_records');
+      return data ? JSON.parse(data) : DEFAULT_DATA;
+    }
+    function saveStoredSources(arr) {
+      localStorage.setItem('iptv_source_records', JSON.stringify(arr));
+    }
+    function switchTab(type) {
+      currentTab = type;
+      document.getElementById('tab-xtream-btn').className = `tab-btn ${type === 'xtream' ? 'active' : ''}`;
+      document.getElementById('tab-m3u-btn').className = `tab-btn ${type === 'm3u' ? 'active' : ''}`;
+      document.getElementById('form-xtream').style.display = type === 'xtream' ? 'block' : 'none';
+      document.getElementById('form-m3u').style.display = type === 'm3u' ? 'block' : 'none';
+    }
+    function openModal() { renderSourceListUI(); document.getElementById('settings-modal').style.display = 'flex'; }
+    function closeModal() { document.getElementById('settings-modal').style.display = 'none'; }
+
+    function renderSourceListUI() {
+      const list = getStoredSources();
+      const container = document.getElementById('source-list-ui');
+      container.innerHTML = '';
+      list.forEach((src, idx) => {
+        const div = document.createElement('div');
+        div.className = 'source-item';
+        div.innerHTML = `
+          <div><strong>[${src.type.toUpperCase()}] ${src.name}</strong><br><small style="color:var(--text-muted); word-break:break-all;">${src.type === 'xtream' ? src.host : src.url}</small></div>
+          <button style="background:#ef4444; border:none; padding:4px 8px; border-radius:4px;" onclick="deleteSource(${idx})">刪除</button>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function addSource() {
+      const useProxy = document.getElementById('use-cors-proxy').checked;
+      const sources = getStoredSources();
+      if (currentTab === 'xtream') {
+        const name = document.getElementById('xc-name').value.trim() || 'Xtream Server';
+        let host = document.getElementById('xc-host').value.trim().replace(/\/+$/, '');
+        const username = document.getElementById('xc-user').value.trim();
+        const password = document.getElementById('xc-pass').value.trim();
+        if (!host || !username || !password) return alert('請填妥資料！');
+        sources.push({ type: 'xtream', name, host, username, password, proxy: useProxy });
+      } else {
+        const name = document.getElementById('m3u-name').value.trim() || 'M3U Playlist';
+        const url = document.getElementById('m3u-url').value.trim();
+        if (!url) return alert('請輸入 URL！');
+        sources.push({ type: 'm3u', name, url, proxy: useProxy });
+      }
+      saveStoredSources(sources);
+      renderSelector();
+      closeModal();
+      changeActiveSource(sources.length - 1);
+    }
+
+    function deleteSource(idx) {
+      let sources = getStoredSources();
+      sources.splice(idx, 1);
+      saveStoredSources(sources);
+      renderSelector();
+      renderSourceListUI();
+    }
+
+    function renderSelector() {
+      const sources = getStoredSources();
+      const sel = document.getElementById('source-selector');
+      sel.innerHTML = '';
+      sources.forEach((s, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.innerText = `[${s.type.toUpperCase()}] ${s.name}`;
+        sel.appendChild(opt);
+      });
+    }
+
+    function changeActiveSource(index) {
+      const sources = getStoredSources();
+      const current = sources[index];
+      if (!current) return;
+      document.getElementById('source-selector').value = index;
+      let targetUrl = current.type === 'xtream'
+        ? `${current.host}/get.php?username=${encodeURIComponent(current.username)}&password=${encodeURIComponent(current.password)}&type=m3u_plus&output=m3u8`
+        : current.url;
+      fetchPlaylist(targetUrl, current.proxy);
+    }
+
+    async function fetchPlaylist(url, useProxy) {
+      const isSelfWorker = url.includes(WORKER_HOST);
+      const finalUrl = (useProxy && !isSelfWorker) ? (WORKER_PROXY + encodeURIComponent(url)) : url;
+      try {
+        const res = await fetch(finalUrl);
+        if (!res.ok) throw new Error("狀態碼: " + res.status);
+        const text = await res.text();
+        parseM3UText(text);
+      } catch (err) {
+        alert("載入失敗: " + err.message);
+      }
+    }
+
+    function parseM3UText(raw) {
+      allChannels = [];
+      const groups = new Set();
+      const lines = raw.split('\n');
+      let current = null;
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        if (line.startsWith('#EXTINF:')) {
+          current = {};
+          const groupMatch = line.match(/group-title="([^"]*)"/);
+          current.group = groupMatch && groupMatch[1].trim() ? groupMatch[1].trim() : '未分類';
+          groups.add(current.group);
+          const parts = line.split(',');
+          current.name = parts.length > 1 ? parts.slice(1).join(',').trim() : '未命名台';
+        } else if (line && !line.startsWith('#') && current) {
+          current.url = line;
+          allChannels.push(current);
+          current = null;
+        }
+      }
+      populateGroupSelect(Array.from(groups));
+      applyFilters();
+    }
+
+    function populateGroupSelect(groups) {
+      const select = document.getElementById('group-filter');
+      select.innerHTML = '<option value="ALL">📁 所有分組 (全部頻道)</option>';
+      groups.sort().forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.innerText = `📁 ${g}`;
+        select.appendChild(opt);
+      });
+    }
+
+    function applyFilters() {
+      const selectedGroup = document.getElementById('group-filter').value;
+      const keyword = document.getElementById('search-input').value.toLowerCase().trim();
+      const filtered = allChannels.filter(ch => {
+        const matchGroup = (selectedGroup === 'ALL' || ch.group === selectedGroup);
+        const matchKeyword = (!keyword || ch.name.toLowerCase().includes(keyword));
+        return matchGroup && matchKeyword;
+      });
+      renderChannelList(filtered);
+    }
+
+    function renderChannelList(list) {
+      const container = document.getElementById('channel-list');
+      container.innerHTML = '';
+      list.forEach((ch) => {
+        const li = document.createElement('li');
+        li.className = 'channel-item';
+        li.innerHTML = `
+          <div class="channel-info">
+            <div class="channel-name">${ch.name}</div>
+            <div class="channel-group">${ch.group}</div>
+          </div>
+        `;
+        li.onclick = () => playStream(ch);
+        container.appendChild(li);
+      });
+    }
+
+    localStorage.removeItem('iptv_source_records');
+    renderSelector();
+    changeActiveSource(0);
+  </script>
+</body>
+</html>
