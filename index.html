@@ -48,6 +48,8 @@
     }
     button.primary { background: var(--accent); border-color: var(--accent); font-weight: 500; }
     button.primary:hover { background: var(--accent-hover); }
+    button.danger { background: #dc2626; border-color: #ef4444; font-weight: 500; }
+    button.danger:hover { background: #b91c1c; }
     .layout-btn.active { background: #3b82f6; border-color: #60a5fa; font-weight: bold; }
 
     #main-container { display: flex; flex: 1; overflow: hidden; }
@@ -214,6 +216,7 @@
     </div>
 
     <div class="header-controls">
+      <button class="danger" onclick="stopAllStreams()">🛑 釋放連線</button>
       <select id="source-selector" onchange="changeActiveSource(this.value)"></select>
       <button class="primary" onclick="openModal()">⚙️ 管理播放源</button>
     </div>
@@ -222,7 +225,7 @@
   <div id="main-container">
     <div id="grid-container" class="layout-1">
       <div class="slot active-slot" id="slot-0" onclick="selectSlot(0)">
-        <div class="slot-overlay" id="overlay-0">畫面 1 (點選設為目標)</div>
+        <div class="slot-overlay" id="overlay-0">畫面 1 (待命中)</div>
         <div class="slot-controls">
           <button id="audio-btn-0" onclick="toggleAudio(0, event)">🔊 發聲</button>
           <button onclick="closeSlot(0, event)">✖ 關閉</button>
@@ -231,7 +234,7 @@
       </div>
 
       <div class="slot" id="slot-1" style="display:none;" onclick="selectSlot(1)">
-        <div class="slot-overlay" id="overlay-1">畫面 2 (點選設為目標)</div>
+        <div class="slot-overlay" id="overlay-1">畫面 2 (待命中)</div>
         <div class="slot-controls">
           <button id="audio-btn-1" onclick="toggleAudio(1, event)">🔇 靜音</button>
           <button onclick="closeSlot(1, event)">✖ 關閉</button>
@@ -240,7 +243,7 @@
       </div>
 
       <div class="slot" id="slot-2" style="display:none;" onclick="selectSlot(2)">
-        <div class="slot-overlay" id="overlay-2">畫面 3 (點選設為目標)</div>
+        <div class="slot-overlay" id="overlay-2">畫面 3 (待命中)</div>
         <div class="slot-controls">
           <button id="audio-btn-2" onclick="toggleAudio(2, event)">🔇 靜音</button>
           <button onclick="closeSlot(2, event)">✖ 關閉</button>
@@ -249,7 +252,7 @@
       </div>
 
       <div class="slot" id="slot-3" style="display:none;" onclick="selectSlot(3)">
-        <div class="slot-overlay" id="overlay-3">畫面 4 (點選設為目標)</div>
+        <div class="slot-overlay" id="overlay-3">畫面 4 (待命中)</div>
         <div class="slot-controls">
           <button id="audio-btn-3" onclick="toggleAudio(3, event)">🔇 靜音</button>
           <button onclick="closeSlot(3, event)">✖ 關閉</button>
@@ -346,7 +349,7 @@
           slotEl.style.display = 'flex';
         } else {
           slotEl.style.display = 'none';
-          closeSlot(i);
+          closeSlot(i); // 徹底斷開被隱藏槽位的網絡連線
         }
       }
 
@@ -377,29 +380,63 @@
       }
     }
 
+    // 關鍵釋放函數：徹底銷毀播放引擎，釋放伺服器配額
     function closeSlot(index, e) {
       if (e) e.stopPropagation();
       cleanupSlotPlayer(index);
       const v = document.getElementById(`video-${index}`);
-      v.removeAttribute('src');
-      v.load();
-      document.getElementById(`overlay-${index}`).innerText = `畫面 ${index + 1} (待命中)`;
+      if (v) {
+        v.pause();
+        v.removeAttribute('src');
+        v.load(); // 強制瀏覽器斷開 TCP 連線
+      }
+      const overlay = document.getElementById(`overlay-${index}`);
+      if (overlay) overlay.innerText = `畫面 ${index + 1} (已斷開釋放)`;
       players[index].name = '';
+    }
+
+    // 一鍵停止全部，釋放連線給 TiviMate/UHF
+    function stopAllStreams() {
+      for (let i = 0; i < 4; i++) {
+        closeSlot(i);
+      }
+      alert('已斷開所有網頁串流連線！現在可以去 TiviMate / UHF 正常收看。');
     }
 
     function cleanupSlotPlayer(idx) {
       if (players[idx].hls) {
-        players[idx].hls.destroy();
+        try {
+          players[idx].hls.stopLoad();
+          players[idx].hls.destroy();
+        } catch(e) {}
         players[idx].hls = null;
       }
       if (players[idx].ts) {
-        players[idx].ts.pause();
-        players[idx].ts.unload();
-        players[idx].ts.detachMediaElement();
-        players[idx].ts.destroy();
+        try {
+          players[idx].ts.pause();
+          players[idx].ts.unload();
+          players[idx].ts.detachMediaElement();
+          players[idx].ts.destroy();
+        } catch(e) {}
         players[idx].ts = null;
       }
     }
+
+    // 監聽分頁切換與關閉：縮小或離開時自動斷開，不霸佔連線
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        console.log('分頁已切到後台，暫停並釋放連線...');
+        for (let i = 0; i < 4; i++) {
+          closeSlot(i);
+        }
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      for (let i = 0; i < 4; i++) {
+        cleanupSlotPlayer(i);
+      }
+    });
 
     function resolveStreamUrl(rawUrl) {
       if (!rawUrl) return "";
@@ -434,7 +471,6 @@
       }
     }
 
-    // 平滑順暢版 MPEG-TS 引擎配置
     function tryMpegTs(idx, url, channelName, onFail) {
       const v = document.getElementById(`video-${idx}`);
       const overlay = document.getElementById(`overlay-${idx}`);
@@ -447,11 +483,11 @@
         }, {
           enableWorker: true,
           enableStashBuffer: true,
-          stashInitialSize: 512 * 1024, // 預留 512KB 初始化緩衝，消除微小斷音微卡
+          stashInitialSize: 512 * 1024,
           lazyLoad: false,
-          liveBufferLatencyChasing: true, // 開啟追幀以保持即時性
-          liveBufferLatencyMaxLatency: 8.0, // 放寬最大延遲容忍至 8 秒，防止頻繁加速卡頓
-          liveBufferLatencyMinRemain: 2.0, // 始終保留 2 秒緩衝護城河，網絡輕微抖動完全不受影響
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: 8.0,
+          liveBufferLatencyMinRemain: 2.0,
           autoCleanupSourceBuffer: true,
           autoCleanupMaxBackwardDuration: 15,
           autoCleanupMinBackwardDuration: 8
@@ -491,7 +527,6 @@
       }
     }
 
-    // 平滑順暢版 HLS 引擎配置
     function tryHls(idx, url, channelName) {
       const v = document.getElementById(`video-${idx}`);
       const overlay = document.getElementById(`overlay-${idx}`);
